@@ -1,6 +1,5 @@
 //
 //  CloudKitUtility.swift
-//  PoC-MyTasks
 //
 //  Created by Leandro Rodrigues on 18/08/22.
 //
@@ -90,6 +89,12 @@ extension CloudKitUtility {
         case iCloudAccountTemporarilyUnavailable
     }
     
+    public enum CloudKitDatabase {
+        case publicData
+        case privateData
+        case sharedData
+    }
+    
 }
 
 extension CloudKitUtility {
@@ -128,17 +133,23 @@ extension CloudKitUtility {
         let recordType: CKRecord.RecordType
         let sortDescriptor: [NSSortDescriptor]?
         let resultsLimit: Int?
+        let database: CloudKitDatabase
+        let zoneName: String
         
         public init(
             predicate: NSPredicate,
             recordType: CKRecord.RecordType,
             sortDescriptor: [NSSortDescriptor]? = nil,
-            resultsLimit: Int? = nil
+            resultsLimit: Int? = nil,
+            database: CloudKitDatabase = .publicData,
+            zoneName: String = CKRecordZone.default().zoneID.zoneName
         ) {
             self.predicate = predicate
             self.recordType = recordType
             self.sortDescriptor = sortDescriptor
             self.resultsLimit = resultsLimit
+            self.database = database
+            self.zoneName = zoneName
         }
     }
     
@@ -151,7 +162,22 @@ extension CloudKitUtility {
         if let limit = requestQuery.resultsLimit {
             queryOperation.resultsLimit = limit
         }
+        
+        let ckRecordZoneID = CKRecordZone(zoneName: requestQuery.zoneName)
+        queryOperation.zoneID = ckRecordZoneID.zoneID
+        
         return queryOperation
+    }
+    
+    static private func getDatabase(cloudkitDatabase: CloudKitDatabase) -> CKDatabase.Scope {
+        switch cloudkitDatabase {
+        case .privateData:
+            return .private
+        case .publicData:
+            return .public
+        case .sharedData:
+            return .shared
+        }
     }
     
     static public func fetch<T: CloudKitModelProtocol> (
@@ -178,29 +204,29 @@ extension CloudKitUtility {
             completion(returnedItems)
         }
         // Execute operation
-        add(operation: operation)
+        add(operation: operation, database: requestQuery.database)
     }
     
     static private func addRecordMatchedBlock<T: CloudKitModelProtocol>(
         operation: CKQueryOperation, completion: @escaping (_ item: T) -> ()) {
-        if #available(iOS 15.0, *) {
-            operation.recordMatchedBlock = { (record, result) in
-                switch result {
-                case .success(let record):
+            if #available(iOS 15.0, *) {
+                operation.recordMatchedBlock = { (record, result) in
+                    switch result {
+                    case .success(let record):
+                        guard let item = T(record: record) else { return }
+                        completion(item)
+                    case .failure(let error):
+                        print("Error addRecordMatchedBlock: \(error.localizedDescription)")
+                        break
+                    }
+                }
+            } else {
+                operation.recordFetchedBlock = { record in
                     guard let item = T(record: record) else { return }
                     completion(item)
-                case .failure(let error):
-                    print("Error addRecordMatchedBlock: \(error.localizedDescription)")
-                    break
                 }
             }
-        } else {
-            operation.recordFetchedBlock = { record in
-                guard let item = T(record: record) else { return }
-                completion(item)
-            }
         }
-    }
     
     static private func addQueryResultBlock(operation: CKQueryOperation, completion: @escaping (_ finished: Bool) -> ()) {
         if #available(iOS 15.0, *) {
@@ -214,8 +240,16 @@ extension CloudKitUtility {
         }
     }
     
-    static private func add(operation: CKDatabaseOperation) {
-        CKContainer.default().publicCloudDatabase.add(operation)
+    static private func add(operation: CKDatabaseOperation, database: CloudKitDatabase) {
+        switch database {
+        case .publicData:
+            CKContainer.default().publicCloudDatabase.add(operation)
+        case .privateData:
+            CKContainer.default().privateCloudDatabase.add(operation)
+        case .sharedData:
+            CKContainer.default().sharedCloudDatabase.add(operation)
+        }
+        
     }
     
     // Delete

@@ -1,6 +1,5 @@
 //
 //  CloudKitModel.swift
-//  PoC-MyTasks
 //
 //  Created by Leandro Rodrigues on 18/08/22.
 //
